@@ -1,0 +1,22 @@
+---
+title: "Untitled"
+format:
+  pdf:
+    include-in-header:
+      text: |
+        \usepackage{lmodern}
+        \setkomafont{title}{\rmfamily\bfseries}
+        \setkomafont{disposition}{\rmfamily\bfseries}
+bibliography: references.bib
+csl: ieee.csl
+link-citations: true
+---
+
+# Introduction
+
+Replace this with your paper content. Cite sources inline like this [@example2024].
+
+# References
+
+This section is auto-generated during render from citations in the text.
+
