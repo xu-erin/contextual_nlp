@@ -3,21 +3,32 @@ title: "Context-Aware Natural Language Processing for Interpretable Analysis of 
 format:
   pdf:
     documentclass: scrartcl
-
+    fig-pos: 'H'
+    include-in-header:
+      text: |
+        \usepackage{float}
+        \AtBeginDocument{\let\oldunderscore\_\renewcommand{\_}{\oldunderscore\allowbreak}}
+        \setlength{\emergencystretch}{3em}
+        \usepackage{etoolbox}
+        \AtBeginEnvironment{longtable}{\small}
 bibliography: references.bib
+nocite: |
+  @liu2025lisa
+  @liu2026decor
+  @nguyen2026evolution_embeddings
 csl: ieee.csl
 link-citations: true
 ---
 
 | **Author:** Erin Xu
 | **Manager:** Saeed Babaeizadeh
-| **Email:** saeed.babaeizadeh@takeda.com
 | **Team:** R&D Quality
-| **Github repository: https://github.com/xu-erin/contextual_nlp_erinxu.git**
+| **Github repository:** QDN space, TBA
 
 ## Purpose
 
-This document is intended for technical stakeholders to reference when reviewing the proof-of-concept implementation of a context-aware NLP enrichment and retrieval workflow for pharmaceutical deviation records. It describes first the problem statement, objectives, data flow, and storage organization, inputs, outputs produced by the pipeline, technical dependencies required to run the workflow. Then, for any unresolved curiosity, there is also a section outlying the justification of this methodology as well as the conceptual breakdowns of the scientific concepts behind this technology. 
+This document is intended for technical stakeholders to reference when reviewing the proof-of-concept implementation of a context-aware natural language processing (NLP) enrichment and retrieval workflow for pharmaceutical deviation records. It describes first the problem statement, objectives, data flow, and storage organization, inputs, outputs produced by the pipeline, and the technical dependencies required to run the workflow. It also explains how to use the semantic-search layer to build retrieval cohorts for specific business questions, and documents the hard-coded
+statistics, thresholds, and heuristics configured in the reporting layer—so that every analyst-set value can be audited and adjusted. For any unresolved curiosity, there is also a section outlining the justification of this methodology as well as the conceptual breakdowns of the scientific concepts behind this technology. Finally, future work and next steps are outlined.
 
 ## Problem Statement
 
@@ -48,7 +59,7 @@ The following capabilities are out of scope for this project:
 - Automated remediation of missing, inconsistent, or incorrect source data.
 - Comprehensive extraction of every possible entity type or terminology variant.
 
-Suggestions of these practices will be outlined in the discussion section.
+Suggestions of these practices will be outlined in the final section.
 
 
 ## Overview of Data Flow
@@ -59,9 +70,9 @@ A Databricks-hosted foundation model generates a short situating context for eac
 
 The two figures below show the big picture overview of the workflow at decreasing levels of abstraction. The pipeline resolves reference entities before generating situating context and constructing the three embedding representations.
 
-principal_data_flow.png{#fig-principal-data-flow}
+![Principal data flow of the context-aware NLP enrichment and retrieval pipeline.](principal_data_flow.png){#fig-principal-data-flow fig-align="center" width=100% height=45%}
 
-stakeholderview.png{#fig-supplementary}
+![Stakeholder view of the pipeline and its supplementary outputs.](stakeholderview.png){#fig-supplementary fig-align="center" width=100%}
 
 ## Engineering: Text Preparation and Filtering
 
@@ -131,35 +142,20 @@ The mart table is treated as a read-only input. The pipeline writes derived data
 | Target processing grain     | One row per deviation event                                                          |
 +-----------------------------+--------------------------------------------------------------------------------------+
 
+\newpage 
+
 ## Input: Reference Data
 
-The pipeline uses six reference datasets to resolve entities found in deviation records.
+The pipeline uses six reference datasets to resolve entities found in deviation records. Sources that live in Databricks (the Veeva controlled-document table and the vendor MDM) refresh on their own and are marked Dynamic; the SharePoint and CTMS exports are point-in-time snapshots and are marked Static. 
 
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| Entity domain           | Raw input table                                    | Primary source fields used                         | Pipeline purpose                                  |
-+=========================+====================================================+====================================================+===================================================+
-| Clinical identifiers    | `us_gmsgq_dev.gms_us_alyt.Clinicalid_deviations`   | `Parent_Node`, `Name`, `Protocol Number`,          | Resolve clinical program, compound, protocol,     |
-|                         |                                                    | `Alternate_Name`, `Development_Name`,              | and study identifiers                             |
-|                         |                                                    | `Parent_Alias`, `Grand_Parent`,                    |                                                   |
-|                         |                                                    | `Grandparent_Alias`, and available contextual      |                                                   |
-|                         |                                                    | attributes                                         |                                                   |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| Controlled documents    | `us_gmsgq_dev.gms_us_alyt.documents_number_        | `document_number__v`,                              | Resolve current, previous, and legacy             |
-|                         | deviations`                                        | `previous_document_number__c`,                     | controlled-document numbers                       |
-|                         |                                                    | `legacy_numbers__c`, `title__v`                    |                                                   |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| Acronyms                | `us_gmsgq_dev.gms_us_alyt.Acronyms_other_          | `Acronym`, `Definition`, `Category`                | Resolve supported medical and industry acronyms   |
-|                         | deviations`                                        |                                                    |                                                   |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| CROs                    | `us_gmsgq_dev.gms_us_alyt.cro_deviations`          | `Name`, `Display Name`, `description`              | Resolve known CRO names and add descriptive       |
-|                         |                                                    |                                                    | context                                           |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| Devices                 | `us_gmsgq_dev.gms_us_alyt.rd_device_list_          | `Name`, `Alias`, `Device_Long_name`,               | Resolve device-name variants and add type and     |
-|                         | deviations`                                        | `Device_Type`, `business_owner`                    | ownership context                                 |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
-| Vendors                 | `us_gmsgq_dev.gms_us_alyt.supplier_list_           | `Supplier_Name_RD`, `Country_RD`                   | Resolve known external supplier names and         |
-|                         | deviations`                                        |                                                    | country context                                   |
-+-------------------------+----------------------------------------------------+----------------------------------------------------+---------------------------------------------------+
+| Entity domain | Source location | Refresh | Raw input table | Primary source fields used | Pipeline purpose |
+|:-----------|:----------------|:------|:----------------|:-------------------------|:----------------|
+| Clinical identifiers | Excel, SharePoint, self-refreshing MDM | Static | `us_gmsgq_dev.gms_us_alyt.Clinicalid_deviations` | `Parent_Node`, `Name`, `Protocol Number`, `Alternate_Name`, `Development_Name`, `Parent_Alias`, `Grand_Parent`, `Grandparent_Alias`, and available contextual attributes | Resolve clinical program, compound, protocol, and study identifiers |
+| Controlled documents | Veeva (Databricks) | Dynamic | `us_gmsgq_dev.gms_us_alyt.documents_number_deviations` | `document_number__v`, `previous_document_number__c`, `legacy_numbers__c`, `title__v` | Resolve current, previous, and legacy controlled-document numbers |
+| Acronyms | SharePoint | Static | `us_gmsgq_dev.gms_us_alyt.Acronyms_other_deviations` | `Acronym`, `Definition`, `Category` | Resolve supported medical and industry acronyms |
+| CROs | Vendor MDM (Databricks) | Dynamic | `us_gmsgq_dev.gms_us_alyt.cro_deviations` | `Name`, `Display Name`, `description` | Resolve known CRO names and add descriptive context |
+| Devices | CTMS (available elsewhere) | Static | `us_gmsgq_dev.gms_us_alyt.rd_device_list_deviations` | `Name`, `Alias`, `Device_Long_name`, `Device_Type`, `business_owner` | Resolve device-name variants and add type and ownership context |
+| Vendors | Vendor MDM (Databricks) | Dynamic | `us_gmsgq_dev.gms_us_alyt.supplier_list_deviations` | `Supplier_Name_RD`, `Country_RD` | Resolve known external supplier names and country context |
 
 ## Entity-Specific Resolution Rules
 
@@ -221,7 +217,7 @@ The pipeline constructs three source-text representations for every retained eve
 |        |                           |                                            | information                       |
 +--------+---------------------------+--------------------------------------------+-----------------------------------+
 
-The BGE-M3 and AI Search implementation also refers to the full tier as the **fine** tier. In this document, **full** describes the text representation and **fine index** refers to the corresponding implementation object.
+The BGE-M3 and AI Search implementation also refers to the full tier as the fine tier. In this document, full describes the text representation and fine index refers to the corresponding implementation object.
 
 ## Output: Contextualized Embedding
 
@@ -271,11 +267,7 @@ The original source-text tiers remain stored separately so that generated or res
 
 ### Generated Situating Context
 
-The pipeline calls a Databricks-hosted foundation model through `ai_query`. The configured model identifier is:
-
-```text
-databricks-gpt-5-4-mini
-```
+The pipeline calls a Databricks-hosted foundation model through `ai_query`. The configured model identifier is ```databricks-gpt-5-4-mini```. 
 
 For each non-empty event, the prompt supplies:
 
@@ -294,6 +286,7 @@ The configured generation parameters are:
 +----------------------------+--------------------+
 
 The generated result is stored as `llm_context` and reused across the full, mid, and core contextual retrieval representations. It is generated context, not source evidence. Reviewers should use the retained source fields and deterministic references when validating its contents.
+
 
 ### Deviation Embeddings Table
 
@@ -475,8 +468,8 @@ The supplementary table is the analysis-facing product of the workflow. It is bu
 |                  |                                          | `QA_Contact`, `Reported_by`, and                             |
 |                  |                                          | `Quality_Approver_CAPA_Final`                                |
 +------------------+------------------------------------------+--------------------------------------------------------------+
-| Location         | `LOC`                                    | Array of inferred countries from name, agency, ccTLD, and    |
-|                  |                                          | adjacent-code signals; `[LOC]` when only the structured      |
+| Local Operating  | `LOC`                                    | Array of inferred countries from name, agency, ccTLD, and    |
+| Company          |                                          | adjacent-code signals; `[LOC]` when only the structured      |
 |                  |                                          | operational-unit flag is present, otherwise empty            |
 +------------------+------------------------------------------+--------------------------------------------------------------+
 | Topics           | `primary_topic`, `secondary_topic`,      | Zero-shot BERTopic (BGE-M3) topic labels; null when the      |
@@ -522,7 +515,7 @@ The parsed entity, personnel, and `LOC` fields are stored as string arrays. The 
 | `deviation_embeddings`                    | Triggered Delta Sync indexing                      | Three AI Search indexes         | Core, mid, and full/fine retrieval              |
 +-------------------------------------------+----------------------------------------------------+---------------------------------+-------------------------------------------------+
 
-## Output: Temporary and Diagnostic
+## Output: Temporary and Diagnostic 
 
 The following objects or results support safe execution and validation but are not canonical downstream data products.
 
@@ -552,39 +545,122 @@ The following objects or results support safe execution and validation but are n
 
 ## Technical Dependencies
 
-The notebook installs or uses the following principal dependencies:
+The pipeline was developed and tested on Databricks Serverless compute. Because the
+`%pip install` cells do not pin exact versions, the versions below were captured from
+the running environment for reproducibility. 
 
-+--------------------------+--------------------------------------------------------------+
-| Dependency               | Role                                                         |
-+==========================+==============================================================+
-| PySpark                  | Source aggregation, reference transformations, joins, and    |
-|                          | Delta table writes                                           |
-+--------------------------+--------------------------------------------------------------+
-| `langdetect`             | Reproducible language detection for the supported            |
-|                          | English-language scope                                       |
-+--------------------------+--------------------------------------------------------------+
-| `FlagEmbedding`          | BGE-M3 model loading and dense vector generation             |
-+--------------------------+--------------------------------------------------------------+
-| `transformers`           | Model and tokenizer dependency                               |
-+--------------------------+--------------------------------------------------------------+
-| `databricks-ai-search`   | Endpoint and Delta Sync index management and querying        |
-+--------------------------+--------------------------------------------------------------+
-| NumPy                    | Vector-order restoration and local array handling            |
-+--------------------------+--------------------------------------------------------------+
-| pandas                   | Driver-side transfer for embedding generation                |
-+--------------------------+--------------------------------------------------------------+
-| Databricks `ai_query`    | Server-side generation of the situating context              |
-+--------------------------+--------------------------------------------------------------+
-| Hugging Face model       | Initial retrieval of the `BAAI/bge-m3` model artifacts       |
-| access                   |                                                              |
-+--------------------------+--------------------------------------------------------------+
-| GPU-capable driver       | FP16 BGE-M3 embedding generation in the current              |
-|                          | implementation                                               |
-+--------------------------+--------------------------------------------------------------+
+### Runtime environment
 
-The package installation cell should not be treated as a version-locked environment specification because most dependencies are not pinned to exact versions. For reproducible handoff, record the tested Databricks Runtime, Python version, package versions, AI Search SDK version, BGE-M3 model revision, and foundation-model endpoint configuration.
++-----------------------------+--------------------------------------------------+
+| Item                        | Value                                            |
++=============================+==================================================+
+| Compute type                | Databricks Serverless                            |
++-----------------------------+--------------------------------------------------+
+| Serverless environment ver. | `[capture]` (Notebook → Environment panel)       |
++-----------------------------+--------------------------------------------------+
+| Python                      | 3.12.3                                           |
++-----------------------------+--------------------------------------------------+
+| GPU / CUDA                  | Required for FP16 BGE-M3; CUDA 12.9              |
+|                             | (`torch` 2.9.0+cu129)                            |
++-----------------------------+--------------------------------------------------+
 
-## Methods: Search and Retrieval 
+### Python packages (captured versions)
+
++---------------------------+----------------+------------------------------------------------+
+| Package                   | Version        | Role                                           |
++===========================+================+================================================+
+| `FlagEmbedding`           | 1.4.0          | BGE-M3 model loading and dense vector          |
+|                           |                | generation                                     |
++---------------------------+----------------+------------------------------------------------+
+| `torch`                   | 2.9.0+cu129    | GPU tensor backend (CUDA 12.9) for BGE-M3      |
++---------------------------+----------------+------------------------------------------------+
+| `transformers`            | 4.57.6         | Model and tokenizer dependency                 |
++---------------------------+----------------+------------------------------------------------+
+| `bertopic`                | 0.17.4         | Zero-shot topic modeling                       |
++---------------------------+----------------+------------------------------------------------+
+| `umap-learn`              | 0.5.9.post2    | Dimensionality reduction for BERTopic          |
++---------------------------+----------------+------------------------------------------------+
+| `hdbscan`                 | 0.8.44         | Density-based clustering for BERTopic          |
++---------------------------+----------------+------------------------------------------------+
+| `scikit-learn`            | 1.6.1          | CountVectorizer (c-TF-IDF) and cluster metrics |
++---------------------------+----------------+------------------------------------------------+
+| `databricks-ai-search`    | 0.78           | Endpoint and Delta Sync index management and   |
+|                           |                | querying                                       |
++---------------------------+----------------+------------------------------------------------+
+| `openai`                  | 3.0.0          | Client for the LLM classification endpoint     |
++---------------------------+----------------+------------------------------------------------+
+| `langdetect`              | 1.0.9          | Reproducible English-language filtering        |
++---------------------------+----------------+------------------------------------------------+
+| `numpy`                   | 2.1.3          | Vector-order restoration and array handling    |
++---------------------------+----------------+------------------------------------------------+
+| `pandas`                  | 2.2.3          | Driver-side transfer for embedding generation  |
++---------------------------+----------------+------------------------------------------------+
+| PySpark                   | (Serverless)   | Source aggregation, joins, and Delta writes    |
++---------------------------+----------------+------------------------------------------------+
+
+### Model and endpoint configuration
+
++-------------------------------------+------------------------------------------------------+
+| Item                                | Value                                                |
++=====================================+======================================================+
+| Embedding model                     | `BAAI/bge-m3`                                         |
++-------------------------------------+------------------------------------------------------+
+| Embedding model revision (commit)   | `[capture]` (Hugging Face snapshot hash)             |
++-------------------------------------+------------------------------------------------------+
+| Embedding dimension                 | 1,024                                                |
++-------------------------------------+------------------------------------------------------+
+| Max sequence length                 | 8,192 tokens                                          |
++-------------------------------------+------------------------------------------------------+
+| Situating-context FM endpoint       | `databricks-gpt-5-4-mini` (`ai_query`)               |
++-------------------------------------+------------------------------------------------------+
+| Situating-context params            | `temperature=0.0`, `max_tokens=300`                  |
++-------------------------------------+------------------------------------------------------+
+| Topic-classifier FM endpoint        | `databricks-gpt-5-4-mini` (OpenAI client)            |
++-------------------------------------+------------------------------------------------------+
+| Topic-classifier params             | `temperature=0.0`, `max_tokens=350`                  |
++-------------------------------------+------------------------------------------------------+
+| Vector Search endpoint              | `deviation-retrieval-vs` (type `STANDARD`)           |
++-------------------------------------+------------------------------------------------------+
+
+## Running the Code
+
+The workflow is a set of Databricks notebooks that must be run in **dependency
+order**: each writes Delta tables or vector indexes that later notebooks read. Run
+the cells top-to-bottom within each notebook. `build_reference_glossary` is the
+foundation and must run first; the reporting notebook runs last.
+
+1. `build_reference_glossary.ipynb`. Normalizes the six reference
+   datasets into `ref_glossary_unified`, compresses the deviation source to event
+   grain, resolves entities, generates the LLM situating context, builds the
+   three-tier BGE-M3 embeddings (`deviation_embeddings`), and creates the AI Search
+   endpoint and the three Delta Sync indexes. Everything downstream depends on its
+   outputs.
+
+2. `topic_modeling.ipynb`. Reads `deviation_embeddings` and assigns
+   interpretable topics with zero-shot BERTopic, writing `deviation_topics` and the
+   primary/secondary/tertiary labels in `deviation_topic_assignments`.
+
+3. `root_cause.ipynb`. Reads `deviation_embeddings` plus the human
+   `Root_Cause_Category` from the source mart and writes the LLM Ishikawa (6M)
+   root-cause judgement per event to `deviation_root_cause`. It is independent of
+   `topic_modeling`—once step 1 is done, steps 2 and 3 may run in either order.
+
+4. `create_supplementary_table.ipynb`. Joins the resolved entities, personnel,
+   location, topics (step 2), and root cause (step 3) into the analysis-facing
+   `deviation_supplementary`, one row per event. Requires steps 1–3.
+
+5. `unblinding_semantic_search.ipynb`. A read-only consumer of the retrieval
+   stack: builds thematic cohorts (inadvertent unblinding, protocol deviations) by
+   unioning a native-HYBRID semantic search with a keyword regex, and writes
+   `unblinding_cohort`. Requires the indexes from step 1; independent of steps 2–4.
+
+6. `deviation_statistics.ipynb` — run last. The reporting layer. Reads the
+   supplementary table, topics, root causes, and the unblinding cohort to produce
+   summary statistics, figures, SME review worklists, and the curated
+   `deviation_triage` export. Requires steps 1–5.
+
+
+## Justification of Methodology
 
 Retrieval-augmented generation splits documents into short chunks, embeds each as
 a dense vector, and retrieves the chunks most similar to a query
@@ -593,8 +669,8 @@ problem for quality text written in Takeda-internal syntax. A deviation
 description may reference a study, compound, controlled document, device, or
 vendor only by an abbreviation or internal identifier that means little on its
 own; as of August 2026, 96.7% of entries mention at least one such entity. For
-example, `pr_id=5225817` reads, *"A US site participating in the TAK-999-3002
-study attempted to randomize a participant…"*—but without context, neither a
+example, `pr_id=5225817` reads, "A US site participating in the TAK-999-3002
+study attempted to randomize a participant…"—but without context, neither a
 retriever nor a topic model can tell whether `TAK-999-3002` is a study, compound,
 document, device, or vendor.
 
@@ -609,12 +685,12 @@ deterministic reference context and original text to form the contextual retriev
 text that is embedded and indexed. This context is stored separately, so generated
 text supplements rather than replaces the source evidence.
 
-A purely semantic index is insufficient here. Dense embeddings capture meaning but
-miss exact matches, whereas BM25 recovers them—decisive for deviation records
+A purely semantic index is insufficient, because dense embeddings capture meaning but
+miss exact matches, whereas BM25 recovers them. This is decisive for deviation records
 dense with protocol numbers, document numbers, and internal codes that must match
 literally, where even the final digit distinguishes vastly different scenarios
 [@anthropic2024contextual]. A controlled scaling study over 511,959 documents
-(~601M tokens) reinforces this: holding questions and evidence fixed while growing
+(about 601M tokens) reinforces this: holding questions and evidence fixed while growing
 the corpus across 28 tiers, BM25 overtakes an LLM-driven agent at roughly 10M
 tokens and leads at every larger tier, approaching a 20-point margin at full scale
 while anchoring the low-cost end of the accuracy–cost frontier [@wang2026bm25].
@@ -629,7 +705,7 @@ for reliable retrieval; and retrieval runs in `HYBRID` mode, fusing dense
 similarity with BM25 over the same contextualized text. Combining semantic and
 lexical signals outperforms embeddings alone [@anthropic2024contextual], and the
 scaling evidence marks lexical ranking as the strongest scalable default for
-enterprise corpora [@wang2026bm25]—making BM25 essential for the exact-identifier
+enterprise corpora [@wang2026bm25], making BM25 essential for the exact-identifier
 queries that characterize deviation analysis.
 
 ## Topic Modeling and its Application to Clinical and Quality Data
@@ -653,7 +729,7 @@ and a word $w_n\sim p(w_n\mid z_n,\boldsymbol{\beta})$ [@blei2003lda], giving
 $$
 p(\boldsymbol{\theta},\mathbf{z},\mathbf{w}\mid\boldsymbol{\alpha},\boldsymbol{\beta})
 = p(\boldsymbol{\theta}\mid\boldsymbol{\alpha})
-  \prod_{n=1}^{N} p(z_n\mid\boldsymbol{\theta})\,p(w_n\mid z_n,\boldsymbol{\beta}).
+  \prod_{n=1}^{N} p(z_n\mid\boldsymbol{\theta})\,p(w_n\mid z_n,\boldsymbol{\beta})
 $$
 
 The document likelihood follows by integrating over $\boldsymbol{\theta}$ and
@@ -679,12 +755,12 @@ of words per class; the topic count need not be fixed in advance
 BERTopic suits deviation narratives for three reasons. It works on contextual
 embeddings rather than bag-of-words counts, capturing semantic relationships LDA
 and NMF discard, and it reuses the same BGE-M3 representation the pipeline already
-computes—so topics are derived from enriched, entity-resolved text
+computes, so topics are derived from enriched, entity-resolved text
 [@grootendorst2022bertopic]. It does not require a preset topic count: HDBSCAN
 discovers clusters of varying density and isolates genuine one-off events as
-outliers, fitting a heterogeneous deviation corpus better than LDA's a-priori
-count and its tendency to assign one dominant topic [@grootendorst2022bertopic].
-Its main limitation—one topic per document—is mitigated by retaining primary,
+outliers, fitting a heterogeneous deviation corpus better than LDA's, which, due to its a-priori
+count, has the tendency to assign one dominant topic [@grootendorst2022bertopic].
+Its main limitation, one topic per document, is mitigated by retaining primary,
 secondary, and tertiary labels from HDBSCAN's soft-cluster probabilities, the
 author's own suggested workaround, while the interpretable c-TF-IDF topic words
 remain reviewable by SMEs for downstream root-cause and trend analysis
@@ -694,24 +770,24 @@ Topic modeling has been applied across information retrieval, text classificatio
 recommendation, and bioinformatics [@hankar2025topic]. Its relevance to quality
 data is direct: Sánchez-Franco et al. applied BERTopic to quality-management
 abstracts (1980–2020), recovering 48 topic-clusters and 13 meta-topics and tracing
-their evolution [@hankar2025topic]—the same mixture-of-topics view that treats a
+their evolution [@hankar2025topic], the same mixture-of-topics view that treats a
 deviation as a blend of recurring operational themes rather than a single rigid
 category. But quality free text is dense with context-dependent short forms: "MS"
-can mean *morphine sulfate*, *multiple sclerosis*, or *mass spectrometry*, and the
+can mean morphine sulfate, multiple sclerosis, or mass spectrometry, and the
 same form can differ across sites [@kugic2024shortform]. Unresolved, this ambiguity
 fragments the vocabulary a topic model sees and degrades coherence
-[@hankar2025topic]—which is precisely why the pipeline resolves references and
+[@hankar2025topic], which is precisely why the pipeline resolves references and
 normalizes acronyms before topics are assigned, yielding cleaner, more
 interpretable themes.
 
-The same ambiguity undermines retrieval—the mechanism that gathers related
+The same ambiguity undermines retrieval. The mechanism that gathers related
 deviations for topic and root-cause analysis. A chunk mentioning only a bare code
 or acronym carries too little context to match a query reliably, the same
 context-loss problem Contextual Retrieval solves by prepending a situating
 description before embedding and indexing [@anthropic2024contextual]. As detailed
 in the earlier section, grounding each record therefore does double duty: it
 disambiguates the vocabulary the topic model sees and enriches the text the
-retriever indexes—which is why the pipeline pairs contextual enrichment with
+retriever indexes, which is why the pipeline pairs contextual enrichment with
 hybrid dense-plus-BM25 retrieval, supporting both the themes surfaced by topic
 modeling and the exact-identifier queries characteristic of deviation analysis
 [@wang2026bm25].
@@ -728,21 +804,20 @@ before topics are assigned.
 
 Topic assignment reads from `deviation_embeddings`, the only table holding both
 the precomputed BGE-M3 vectors and the source text. Two design decisions follow
-directly from BERTopic's architecture, which deliberately *separates document
-clustering from topic representation* [@grootendorst2022bertopic]. First,
-clustering uses the `embedding` column—BGE-M3 encoded over the *enriched*
-`contextual_retrieval_text_full`—so documents are grouped in a space that already
+directly from BERTopic's architecture, which deliberately separates document
+clustering from topic representation [@grootendorst2022bertopic]. First,
+clustering uses the `embedding` column, BGE-M3 encoded over the enriched
+`contextual_retrieval_text_full`, so documents are grouped in a space that already
 carries resolved-reference and situating context, directly addressing the
 context-loss and short-form ambiguity that would otherwise fragment topics
 [@anthropic2024contextual; @kugic2024shortform]. Second, the class-based TF-IDF
-(c-TF-IDF) labeling step uses the *clean* `source_free_text_full`, stripped of its
+(c-TF-IDF) labeling step uses the clean `source_free_text_full`, stripped of its
 `Column_Name:` scaffolding, so topic keywords reflect deviation content rather
 than schema tokens. Because the embeddings are precomputed, BERTopic skips
-re-encoding and only encodes the short candidate-label strings—an efficiency the
-model's modular design permits [@grootendorst2022bertopic].
+re-encoding and only encodes the short candidate-label strings.
 
 The first strategy defines 18 candidate topics from GxP quality vocabulary
-(e.g., inadvertent unblinding, GMP manufacturing deviation, stability OOS). Each
+(inadvertent unblinding, GMP manufacturing deviation, stability OOS). Each
 label is encoded with BGE-M3 into the same 1024-dimensional space as the
 documents, and events are matched by cosine similarity above a 0.5 threshold;
 documents matching no label are clustered as emergent topics via UMAP + HDBSCAN.
@@ -754,11 +829,11 @@ unrelated documents as outliers rather than forcing them into a topic
 c-TF-IDF, following the paper's generalization of TF-IDF from documents to
 concatenated document "classes" [@grootendorst2022bertopic].
 
-A deviation often spans several themes (e.g., a manufacturing deviation, an
+A deviation often spans several themes (a manufacturing deviation, an
 overdue CAPA, and a documentation gap). This is precisely BERTopic's
 acknowledged limitation—it assigns one dominant topic per document—and the
 mitigation implemented here is the author's own suggested workaround: using
-HDBSCAN's soft-cluster probabilities to recover a topic *distribution* per
+HDBSCAN's soft-cluster probabilities to recover a topic distribution per
 document [@grootendorst2022bertopic]. Concretely, `approximate_distribution()`
 computes topic relevance over a sliding window of passages, and topics above a
 0.1 threshold are retained as primary, secondary, and tertiary labels, written to
@@ -771,7 +846,7 @@ To test the value of contextual enrichment, the same BERTopic configuration
 `embedding` (BGE-M3 over the full contextualized text) and once on
 `core_embedding` (BGE-M3 over the core text only). Agreement between the two
 partitions is quantified with Adjusted Rand Index and Normalized Mutual
-Information, and quality is compared via outlier rate and topic diversity—the
+Information, and quality is compared via outlier rate and topic diversity, which is the
 distinctiveness metric standard in the topic-modeling literature
 [@hankar2025topic; @grootendorst2022bertopic]. Holding the clustering algorithm
 fixed isolates the effect of how much context was embedded, testing the central
@@ -785,9 +860,7 @@ topic when nothing fits, and additionally returns a root-cause category (an
 Ishikawa-style controlled vocabulary), a regulatory-impact category, a quoted
 evidence span, and a calibrated confidence score. Grounding guardrails instruct
 the model to use "Not determinable" rather than guess, keeping generated labels
-tied to textual evidence—consistent with treating LLM output as *supplementary*
-context, not source truth [@anthropic2024contextual]. Returned labels are snapped
-to canonical spellings; unmatched labels are tracked as taxonomy-expansion
+tied to textual evidence. Returned labels are snapped to canonical spellings; unmatched labels are tracked as taxonomy-expansion
 candidates. Running the classifier on the enriched text rather than raw narrative
 is essential: without resolved references, an identifier such as `TAK-999-3002`
 carries too little standalone meaning for either a topic model or an LLM to
@@ -800,3 +873,185 @@ c-TF-IDF keywords, while the LLM provides evidence-anchored labels and root-caus
 reasoning. Agreement raises confidence in an assignment; divergence flags events
 for subject-matter-expert review, supporting the downstream root-cause and trend
 analysis the supplementary table is built for.
+
+## Feature: Semantic Search
+
+The unblinding cohort builder shows how to query the retrieval stack to assemble a
+high-recall set of related deviations for a business question—here, inadvertent
+unblinding. It is a read-only consumer of the indexes built upstream; it
+retrieves and profiles events but never reprocesses raw data. The same pattern
+generalizes to any thematic cohort (protocol deviations, data-integrity events,
+etc.) by swapping the queries and keyword pattern.
+
+### How to run it
+
+1. Provision a GPU. BGE-M3 is loaded only to encode the handful of query
+   phrasings; the keyword path needs no model, so a keyword-only run can skip the
+   GPU entirely.
+2. Define the query set. Edit `UNBLINDING_QUERIES` with several phrasings that
+   capture how the theme surfaces in practice ("code break performed without
+   authorization," "IP kit revealed treatment allocation"). More phrasings raise
+   recall.
+3. Define the keyword pattern. Edit the `KW` regex with literal terms and
+   spelling variants (`unblind`, `un-blind`, "blind was broken").
+4. Run the retriever. `CohortRetriever` encapsulates the AI Search client, the
+   BGE-M3 encoder, and the index config; `semantic_ids()` and `keyword_ids()` return
+   the two `pr_id` sets, which are unioned into the cohort.
+5. Inspect the union counts. The printout of *both signals / semantic-only /
+   keyword-only* is the first quality check—if semantic-only dominates, lower
+   `SEM_PER_QUERY` or sharpen the phrasings; if it is near-empty, raise
+   `SEM_PER_QUERY` or add phrasings.
+
+The cohort is joined back to the source mart for the rich fields
+(`Root_Cause_Category`, `Impact_Assessment`, `Action_Text`, program/protocol) and
+written to `unblinding_cohort` for downstream reporting.
+
+The semantic leg runs each phrasing as a native AI Search **HYBRID** query, fusing
+dense BGE-M3 similarity with Okapi BM25 over the same contextualized text via
+Reciprocal Rank Fusion; the separate keyword regex is unioned on top as a
+guaranteed exact-term precision anchor. Because RRF-fused scores are not
+cosine-comparable, recall is governed by how many top hits each phrasing
+contributes rather than a similarity cutoff:
+
+| Parameter | Effect | When to adjust |
+|---|---|---|
+| `SEM_PER_QUERY` (default 50) | Top-N HYBRID hits pulled per phrasing | Raise for higher recall; lower to keep the cohort tight |
+
+Tune it by inspecting borderline hits, not by guessing: pull a sample of
+semantic-only matches and check whether they are genuine unblinding events.
+
+The builder profiles the cohort along the dimensions the business questions ask for—
+cohort size as a share of all deviations, impacted programs and protocols,
+recurrence (programs with ≥2 events), root-cause categories and sub-categories,
+CAPA/`Action_Text` for review, and keyword-flagged safety and data-integrity impact.
+The provenance pie and root-cause/program bars summarize this visually.
+
+Before quoting the cohort percentage externally, spot-check the semantic-only hits: keyword-only and both-signal events are high-confidence, but semantic-only matches are the ones most likely to include false positives. The
+impact figures are keyword flags over inconsistent free text and are a screening
+signal, not a validated impact determination—the `Action_Text` and impact fields are
+surfaced for SME review precisely because a full answer ("are CAPAs preventing
+recurrence?") needs CAPA-status data the source does not contain.
+
+This was used to great success for topics about unblinding and protocol deviations. 
+
+## Feature: Configured Heuristics and Assumptions
+
+The reporting layer applies several hard-coded rules, thresholds, and vocabularies.
+These are analyst- and SME-defined configuration, not model outputs: they encode
+how the business (per the CPMQ business-question set) wants deviations grouped,
+flagged, and prioritized. They are documented here so reviewers can audit and adjust
+them.
+
+### Business-category taxonomy
+
+`topic_category()` maps each BERTopic label to one of nine high-level categories
+(Clinical / GCP, Data Integrity & IT, Manufacturing / GMP, Equipment & Facilities,
+Quality Control, Quality Systems, Supply Chain, Safety & PV, Other / Emergent) using
+keyword rules. This rollup answers the "where is delivery breaking down" and
+"which issue categories recur across sources" questions by
+collapsing dozens of fine-grained topics into a stable, reviewable set of themes.
+The mapping is keyword-based and deliberately robust to label truncation; unmatched
+labels fall through to Other / Emergent rather than being force-fit.
+
+### Severity / regulatory-impact flags
+
+`SEVERITY_PATTERNS` applies four case-insensitive regex flags over
+`Impact_Assessment` + `Quality_Final_Assessment`:
+
+| Flag | Triggers on (keywords) |
+|---|---|
+| Patient safety | safety, subject, patient, harm, injur, adverse |
+| Data integrity | data integrity, GCP/GxP, validit, falsif, ALCOA |
+| Regulatory | regulator, FDA/EMA/ICH, inspection, reportab, recall |
+| Product quality | batch, contaminat, OOS, sterilit |
+
+These let reviewers triage by risk rather than by volume, directly supporting the
+safety- and data-integrity-impact requirements of Q1 and the inspection-exposure
+questions. The patterns are keyword heuristics over free text and are intended as a
+first-pass screen, not a compliance determination.
+
+### Repeat-offender and recurrence thresholds
+
+- `recur >= 2` defines a "repeat-offender" program or protocol (≥2 deviations).
+- Recurring `topic root-cause` signatures are the most frequent (topic, root
+  cause) pairs.
+
+Both operationalize the many CPMQ questions about systemic vs. isolated issues and
+recurrence across programs / CROs / vendors. A
+threshold of 2 is the minimal definition of "recurring"; SMEs may raise it to focus
+on the most systemic offenders.
+
+### Automation-value assumption
+
+`MIN_PER_EVENT = 20` is an SME-provided estimate of the analyst minutes required to
+manually triage and root-cause one deviation. It drives the "analyst-hours saved"
+tiles and is the single assumption behind the effort-savings figures. It is clearly an
+estimate; the hours-saved numbers scale linearly with it, so it should be revised to
+each team's actual baseline before being quoted externally.
+
+### Validation thresholds
+
+- Confidence ≥ 80 (or textual "high") marks an event as high-confidence
+  auto-accept; everything else routes to analyst review.
+- `review_priority` sums the review drivers (outlier topic + low confidence +
+  model≠human root cause + severity score), so the queue sorts worst-first.
+- `review_reasons` records why each event was flagged.
+
+This is the human-in-the-loop validation funnel. The pipeline auto-accepts only
+where it is confident and agrees with the human record, and escalates disagreements
+and high-severity events to support the CAPA-effectiveness and "predictive vs.
+reactive" questions by making model trust explicit and auditable.
+
+### Root-cause label reconciliation
+
+`LLM_TO_GT` maps the LLM's Ishikawa 6M labels to the
+reviewer-entered `Root_Cause_Category` naming before comparison, so the agreement
+confusion matrix compares like with like. This underpins the model-vs-human
+agreement metric that establishes whether the automated root-cause call can be
+trusted.
+
+### Semantic cohorts
+
+The unblinding cohort is consumed pre-built from `unblinding_cohort` (hybrid
+vector + keyword retrieval) to serve the unblinding-focused questions.
+The protocol-deviation cohort is defined as any event whose primary, secondary,
+or tertiary topic mentions "protocol," reusing the BERTopic signal rather than a new
+text pass, to serve the protocol-deviation questions.
+
+## Path to Production
+
+The out-of-scope capabilities are deferred to a separate productionization and governance effort. The steps below are Databricks-native and require no redesign of the proof of concept—only promoting it under managed orchestration, governance, and monitoring.
+
+Because the pipeline currently reprocesses the full corpus on each run, the transformation stages should be migrated to Lakeflow Declarative Pipelines (formerly Delta Live Tables) so that processing becomes incremental [@databricks_ldp; @databricks_streaming_tables]. Each stage would become a flow writing to a streaming table, with source updates applied through AUTO CDC rather than plain appends [@databricks_streaming_tables]—relying on Change Data Feed, which is already enabled on `deviation_embeddings`—so that only changed events are re-enriched and re-embedded.
+
+The three Delta Sync indexes are similarly refreshed on a triggered pipeline today; switching the latency-sensitive tiers to a continuous pipeline would keep them current as new data arrives [@databricks_vs_createindex; @databricks_vs_api]. Since they read precomputed vectors from a Change-Data-Feed-enabled table, those updates are incremental and require no re-encoding of unchanged rows [@databricks_vs_api], though the higher cost of continuous operation means it is best reserved for the fine tier while the mid and core tiers stay triggered.
+
+In production, the notebook diagnostics would be replaced by Databricks Lakehouse Monitoring [@databricks_lakehouse_mon; @databricks_uc_governance], pairing a time-series monitor over the event tables—tracking null rates, entity coverage, and `llm_context` population—with an inference monitor that compares the topic and root-cause outputs against the human `Root_Cause_Category` baseline to follow drift and agreement over time, complemented by system tables for pipeline-health and cost observability [@databricks_observability]. Sustained drift then serves as the signal to re-fit BERTopic, refresh the candidate topics, or revise the LLM prompt.
+
+Finally, governance would center on Unity Catalog: the derived products would be promoted from the development catalog into a dev/staging/prod structure [@databricks_uc_governance; @databricks_uc_bestpractices], protected with role-based access alongside row filters and column masks on sensitive text [@databricks_uc_governance], and guarded at the record level with pipeline expectations [@databricks_ldp; @databricks_streaming_tables].
+
+## Future Work
+
+The current pipeline uses BGE-M3 in dense mode only. BGE-M3 natively supports multi-vector and sparse representations alongside its dense output, so a natural extension is to exploit late-interaction retrieval, that is, scoring queries against token-level vectors rather than a single pooled embedding.
+
+\newpage
+
+## Acknowledgements 
+
+I am grateful to have had the opportunity to work on this project, and I hope it will be useful to the people who rely on deviation data for their work.
+
+This work was made possible through collaboration across R&D Quality Compliance, Systems and Data, and DD&T. I am grateful to my manager, Saeed Babaeizadeh, and to Aayushi Prasad, my Tomodachi. I thank them for sharing their expertise on TrackWise, deviations, and deterministic rules; as well as Calvin Neprud, Karthik Suresh, Michael Prokle, and Bob Sorabella for helping me locate or creating the reference tables for MDM. I owe particular thanks to Katie Evenson and Calvin. Their guidance shaped this project in lasting ways. Beyond their feedback on seeding topics, business logic, and schema planning, they helped me understand what genuinely useful outputs look like and how to frame them for the people who would rely on them, and Katie's encouragement and tips on presenting the work gave me both direction and confidence, and this project is stronger for it. My thanks also to Jared Wiemann and Kanrong Yu for their support of this work.
+
+I had many wonderful conversations along the way with Mingxi Song, Kevin Cheng, Minnan Xu, Neda Hassanpour, Nellie Holger, and everyone I met across MA Bio Ops, DD&T, and over lunch. Finally, I would especially like to thank Xuemei Li and Yunliang Cai for their
+mentorship. They gave me a great deal of perspective. 
+
+This project was, for me, far more than a technical deliverable. I came away with a more independent (agentic, if you will) problem-solving workflow, a clearer sense of how to set goals and learned what it means to build within data-governance constraints. I was never drawn to NLP, yet somehow now, I cannot stop thinking about it. Retrieval-system design and the Databricks documentation page plague my nightly visions. I realized I was interested in something in the domain of NLP after all, namely, optimal guarantees for topic models with an unknown number of topics using NMF. I will head into my final year of undergraduate study at the University of Toronto. My primary interest remains in applying machine learning and multivariate statistics to medicine and biology; functional analysis and representation learning. If you would like to continue the conversation, please feel free to reach out to me on LinkedIn.
+
+\newpage
+
+## References
+
+Generative AI tools were used to assist with code, drafting, and formatting. All final decisions and content are my own. Quarto was used to render this document. The references were generated with Zotero and the Better BibTeX plugin and formatted with the `apa` CSL style.
+
+::: {#refs}
+:::
