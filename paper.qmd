@@ -906,7 +906,7 @@ The cohort is joined back to the source mart for the rich fields
 (`Root_Cause_Category`, `Impact_Assessment`, `Action_Text`, program/protocol) and
 written to `unblinding_cohort` for downstream reporting.
 
-The semantic leg runs each phrasing as a native AI Search **HYBRID** query, fusing
+The semantic leg runs each phrasing as a native AI Search HYBRID query, fusing
 dense BGE-M3 similarity with Okapi BM25 over the same contextualized text via
 Reciprocal Rank Fusion; the separate keyword regex is unioned on top as a
 guaranteed exact-term precision anchor. Because RRF-fused scores are not
