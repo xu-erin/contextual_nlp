@@ -27,18 +27,18 @@ link-citations: true
 
 ## Purpose
 
-This document is intended for technical stakeholders to reference when reviewing the proof-of-concept implementation of a context-aware natural language processing (NLP) enrichment and retrieval workflow for pharmaceutical deviation records. It describes first the problem statement, objectives, data flow, and storage organization, inputs, outputs produced by the pipeline, and the technical dependencies required to run the workflow. It also explains how to use the semantic-search layer to build retrieval cohorts for specific business questions, and documents the hard-coded
-statistics, thresholds, and heuristics configured in the reporting layer—so that every analyst-set value can be audited and adjusted. For any unresolved curiosity, there is also a section outlining the justification of this methodology as well as the conceptual breakdowns of the scientific concepts behind this technology. Finally, future work and next steps are outlined.
+This document is intended for technical stakeholders to reference when reviewing the proof-of-concept implementation of a context-aware natural language processing (NLP) enrichment and retrieval workflow for pharmaceutical deviation records. It describes the problem statement, objectives, data flow, storage organization, inputs, outputs produced by the pipeline, how to run the workflow, how to use the semantic-search layer to build retrieval cohorts for specific business questions, interpreting hard-coded statistics configured in the reporting layer, the justification of this methodology, conceptual breakdowns of the scientific concepts behind this technology, future work and next steps.
 
 ## Problem Statement
 
-Quality Data Navigator (QDN) provides a governed platform for structured quality data, but the narrative text associated with pharmaceutical deviations remains difficult to query and analyze systematically. These narratives contain operational context, referenced entities, recurring themes, and root-cause signals that are not fully represented in existing structured fields.
+Quality Data Navigator (QDN) provides a governed platform for structured quality data, but the narrative text associated with pharmaceutical deviations remains difficult to query and analyze systematically. These narratives contain operational context, referenced entities, recurring themes, and root-cause signals that are not fully represented in existing structured fields. **This work extends QDN’s foundation to the unstructured record, by turning them into structured signals that support faster, more consistent quality insight generation.**
+
 
 ## Objectives
 
 This project develops a context-aware NLP enrichment and retrieval workflow for pharmaceutical deviation records. Rather than analyzing only the deviation title and description, the workflow constructs tiered text representations across event narratives, quality and impact assessments, structured root-cause descriptions, and action text, at both event and action-record grains. These representations support entity extraction and normalization, contextual enrichment, embeddings, topic and root-cause analysis, vector indexing, and semantic and hybrid retrieval.
 
-Success is measured by the ability to:
+The following capabilities of the project are in scope: 
 
 1. Demonstrate that heterogeneous free-text fields can be consolidated into reproducible core, mid, and full deviation representations while preserving event and action-record grain.
 2. Extract and normalize relevant entity-level information from the available narrative and descriptive fields.
@@ -59,14 +59,55 @@ The following capabilities are out of scope for this project:
 - Automated remediation of missing, inconsistent, or incorrect source data.
 - Comprehensive extraction of every possible entity type or terminology variant.
 
-Suggestions of these practices will be outlined in the final section.
+## Accessing the Results 
+1. If you want to look at the complete embedding table: `us_gmsgq_dev.gms_us_mart.deviation_embeddings`
+2. If you want to look at the QDN supplementary table: `us_gmsgq_dev.gms_us_mart.deviation_supplementary`
+3. To query hybrid search, use the AI Search endpoint: `deviation-retrieval-vs-qdn`. See later section for more detail. 
 
+## Running the Code
+
+The workflow is a set of Databricks notebooks that must be run in **dependency
+order**: each writes Delta tables or vector indexes that later notebooks read. But, they don't need to be run less there is a need for data refresh. Running the later analysis notebooks without refreshing the foundation tables will produce the same outputs as the last run. The notebooks are designed to be idempotent and can be re-run multiple times without changing the outputs, provided that the source data has not changed. Editing the downstream notebooks to produce more heuristics is supported and will not require re-running the foundation notebooks unless the source data has changed.
+
+
+Here is the full process anyways. Run the cells top-to-bottom within each notebook. `build_reference_glossary` is the
+foundation and must run first; the reporting notebook runs last.
+
+1. `build_reference_glossary.ipynb`. Normalizes the six reference
+   datasets into `ref_glossary_unified`, compresses the deviation source to event
+   grain, resolves entities, generates the LLM situating context, builds the
+   three-tier BGE-M3 embeddings (`deviation_embeddings`), and creates the AI Search
+   endpoint and the three Delta Sync indexes. Everything downstream depends on its
+   outputs.
+
+2. `topic_modeling.ipynb`. Reads `deviation_embeddings` and assigns
+   interpretable topics with zero-shot BERTopic, writing `deviation_topics` and the
+   primary/secondary/tertiary labels in `deviation_topic_assignments`.
+
+3. `root_cause.ipynb`. Reads `deviation_embeddings` plus the human
+   `Root_Cause_Category` from the source mart and writes the LLM Ishikawa (6M)
+   root-cause judgement per event to `deviation_root_cause`. It is independent of
+   `topic_modeling`—once step 1 is done, steps 2 and 3 may run in either order.
+
+4. `create_supplementary_table.ipynb`. Joins the resolved entities, personnel,
+   location, topics (step 2), and root cause (step 3) into the analysis-facing
+   `deviation_supplementary`, one row per event. Requires steps 1–3.
+
+5. `unblinding_semantic_search.ipynb`. A read-only consumer of the retrieval
+   stack: builds thematic cohorts (inadvertent unblinding, protocol deviations) by
+   unioning a native-HYBRID semantic search with a keyword regex, and writes
+   `unblinding_cohort`. Requires the indexes from step 1; independent of steps 2–4.
+
+6. `deviation_statistics.ipynb` — run last. The reporting layer. Reads the
+   supplementary table, topics, root causes, and the unblinding cohort to produce
+   summary statistics, figures, SME review worklists, and the curated
+   `deviation_triage` export. Requires steps 1–5.
 
 ## Overview of Data Flow
 
 The pipeline combines formatted TrackWise deviation records with six supporting reference datasets. Reference records are normalized into a common lookup contract and consolidated into a unified glossary. Deviation records are then compressed to one row per event, cleaned, filtered to the supported language scope, resolved against the glossary, and represented at three levels of narrative detail.
 
-A Databricks-hosted foundation model generates a short situating context for each deviation. The deterministic reference context, generated context, and source text are combined into contextual retrieval text. BGE-M3 converts each text tier into a 1,024-dimensional dense vector. Three Databricks AI Search indexes expose the resulting core, mid, and full representations for hybrid vector and keyword retrieval.
+A Databricks-hosted foundation model generates a short situating context for each deviation. The deterministic reference context, generated context, and source text are combined into contextual retrieval text. BGE-M3 converts each text tier into a 1,024-dimensional dense vector. Three Databricks AI Search indexes expose the resulting core, mid, and full representations for hybrid vector and keyword retrieval. These are then used for topic discovery, root-cause analysis, cohort retrieval, and other heuristics.
 
 The two figures below show the big picture overview of the workflow at decreasing levels of abstraction. The pipeline resolves reference entities before generating situating context and constructing the three embedding representations.
 
@@ -378,7 +419,7 @@ Retaining these fields preserves the relationship between each vector and the te
 +-----------------------+----------------------------------------------------------+
 | Attribute             | Value                                                    |
 +=======================+==========================================================+
-| Endpoint name         | `deviation-retrieval-vs`                                 |
+| Endpoint name         | `deviation-retrieval-vs-qdn`                             |
 +-----------------------+----------------------------------------------------------+
 | Endpoint type         | `STANDARD`                                               |
 +-----------------------+----------------------------------------------------------+
@@ -481,6 +522,8 @@ The supplementary table is the analysis-facing product of the workflow. It is bu
 +------------------+------------------------------------------+--------------------------------------------------------------+
 
 The parsed entity, personnel, and `LOC` fields are stored as string arrays. The topic and root-cause fields are populated by optional upstream tables; when those tables are absent, the pipeline writes the columns as nulls so that the supplementary schema remains stable. The full source and contextual retrieval text are retained alongside the extracted fields so that every derived value can be traced back to its supporting evidence.
+
+\newpage
 
 ## Input-to-Output Lineage
 
@@ -619,50 +662,13 @@ the running environment for reproducibility.
 +-------------------------------------+------------------------------------------------------+
 | Topic-classifier params             | `temperature=0.0`, `max_tokens=350`                  |
 +-------------------------------------+------------------------------------------------------+
-| Vector Search endpoint              | `deviation-retrieval-vs` (type `STANDARD`)           |
+| Vector Search endpoint              | `deviation-retrieval-vs-qdn` (type `STANDARD`)       |
 +-------------------------------------+------------------------------------------------------+
-
-## Running the Code
-
-The workflow is a set of Databricks notebooks that must be run in **dependency
-order**: each writes Delta tables or vector indexes that later notebooks read. Run
-the cells top-to-bottom within each notebook. `build_reference_glossary` is the
-foundation and must run first; the reporting notebook runs last.
-
-1. `build_reference_glossary.ipynb`. Normalizes the six reference
-   datasets into `ref_glossary_unified`, compresses the deviation source to event
-   grain, resolves entities, generates the LLM situating context, builds the
-   three-tier BGE-M3 embeddings (`deviation_embeddings`), and creates the AI Search
-   endpoint and the three Delta Sync indexes. Everything downstream depends on its
-   outputs.
-
-2. `topic_modeling.ipynb`. Reads `deviation_embeddings` and assigns
-   interpretable topics with zero-shot BERTopic, writing `deviation_topics` and the
-   primary/secondary/tertiary labels in `deviation_topic_assignments`.
-
-3. `root_cause.ipynb`. Reads `deviation_embeddings` plus the human
-   `Root_Cause_Category` from the source mart and writes the LLM Ishikawa (6M)
-   root-cause judgement per event to `deviation_root_cause`. It is independent of
-   `topic_modeling`—once step 1 is done, steps 2 and 3 may run in either order.
-
-4. `create_supplementary_table.ipynb`. Joins the resolved entities, personnel,
-   location, topics (step 2), and root cause (step 3) into the analysis-facing
-   `deviation_supplementary`, one row per event. Requires steps 1–3.
-
-5. `unblinding_semantic_search.ipynb`. A read-only consumer of the retrieval
-   stack: builds thematic cohorts (inadvertent unblinding, protocol deviations) by
-   unioning a native-HYBRID semantic search with a keyword regex, and writes
-   `unblinding_cohort`. Requires the indexes from step 1; independent of steps 2–4.
-
-6. `deviation_statistics.ipynb` — run last. The reporting layer. Reads the
-   supplementary table, topics, root causes, and the unblinding cohort to produce
-   summary statistics, figures, SME review worklists, and the curated
-   `deviation_triage` export. Requires steps 1–5.
 
 
 ## Justification of Methodology
 
-Retrieval-augmented generation splits documents into short chunks, embeds each as
+Typical retrieval-augmented generation splits documents into short chunks, embeds each as
 a dense vector, and retrieves the chunks most similar to a query
 [@anthropic2024contextual]. Chunking strips away surrounding context—an acute
 problem for quality text written in Takeda-internal syntax. A deviation
@@ -674,41 +680,36 @@ study attempted to randomize a participant…"—but without context, neither a
 retriever nor a topic model can tell whether `TAK-999-3002` is a study, compound,
 document, device, or vendor.
 
-Contextual Retrieval addresses this by prepending a short, chunk-specific
-description to each unit of text before it is embedded and indexed, producing
-Contextual Embeddings and Contextual BM25; because manual annotation is infeasible
-at scale, a language model generates the description from surrounding context
-[@anthropic2024contextual]. The pipeline mirrors this: for each deviation, a
+Contextual Retrieval addresses this by prepending with (1) expanded references across identified entities and (2) a short, chunk-specific
+description to each unit of text before it is embedded and indexed. The result is Contextual Embeddings and Contextual BM25. For each deviation, a
 foundation model generates a brief situating description (`llm_context`) from the
 resolved reference context and source narrative, which is combined with the
 deterministic reference context and original text to form the contextual retrieval
 text that is embedded and indexed. This context is stored separately, so generated
 text supplements rather than replaces the source evidence.
 
-A purely semantic index is insufficient, because dense embeddings capture meaning but
-miss exact matches, whereas BM25 recovers them. This is decisive for deviation records
-dense with protocol numbers, document numbers, and internal codes that must match
-literally, where even the final digit distinguishes vastly different scenarios
-[@anthropic2024contextual]. A controlled scaling study over 511,959 documents
-(about 601M tokens) reinforces this: holding questions and evidence fixed while growing
-the corpus across 28 tiers, BM25 overtakes an LLM-driven agent at roughly 10M
-tokens and leads at every larger tier, approaching a 20-point margin at full scale
-while anchoring the low-cost end of the accuracy–cost frontier [@wang2026bm25].
-The advantage holds because enterprise questions hinge on precise lexical anchors
-while distractors are semantically similar but wrong; it persists under paraphrase,
-and BM25's query cost stays nearly constant (about 5.8K tokens) as the corpus grows
-[@wang2026bm25].
+The contextualized text is embedded using the BGE-M3 model. Embedding is a process that turns the words into vectors. Vectors allow for distances to be computed, as this resembles how similar meanings are close to each other in a mathematical space. BGE-M3 was selected because it can process inputs ranging from short sentences to documents of up to 8,192 tokens, accommodating the longer deviation narratives produced by combining source text, resolved reference information, and LLM-generated situating context [@chen2024m3]. It also supports more than 100 languages, making the retrieval pipeline more suitable for records that may contain multilingual content. The resulting 1,024-dimensional embeddings represent the contextualized meaning of each record, enabling conceptually related deviations to be retrieved even when they use different wording. 
 
-This justifies two design choices: situating context is generated and prepended
-before indexing, so every embedding and keyword entry carries the context needed
-for reliable retrieval; and retrieval runs in `HYBRID` mode, fusing dense
-similarity with BM25 over the same contextualized text. Combining semantic and
+While embeddings excel at capturing semantic relationships, they can miss crucial exact matches, which is still needed for deviation records dense with protocol numbers, document numbers, and internal codes that must match literally, where even the final digit distinguishes vastly different scenarios. Fortunately, there’s an older technique that can assist in these situations. Okapi BM25 (Best Matching 25) is a ranking function that uses lexical matching to find precise word or phrase matches. It builds on the principles of Term Frequency-Inverse Document Frequency (TF-IDF) by considering both how frequently a term appears in a document and how rare that term is across the document collection. TF-IDF represents this importance as:
+
+$$\operatorname{TF\text{-}IDF}(t,d) = \operatorname{TF}(t,d) \cdot \log\left(\frac{N}{\operatorname{DF}(t)}\right)$$
+
+where $t$ is the term, $d$ is the document, $N$ is the total number of documents, and $\operatorname{DF}(t)$ is the number of documents containing the term. BM25 refines this by introducing parameters that control term frequency saturation and document length normalization, making it more robust to variations in document size and term distribution. The BM25 score for a document $d$ given a query $Q$ is computed as:
+
+$$\operatorname{BM25}(d, Q) = \sum_{t \in Q} \frac{\operatorname{TF}(t,d) \cdot (k+1)}{\operatorname{TF}(t,d) + k \cdot \left(1 - b + b \cdot \frac{|d|}{\operatorname{avgdl}}\right)} \cdot \log\left(\frac{N - \operatorname{DF}(t) + 0.5}{\operatorname{DF}(t) + 0.5}\right)$$
+These adjustments make BM25 particularly effective for queries that include unique identifiers or technical terms.
+
+RAG solutions can more accurately retrieve the most applicable chunks by combining the embeddings and BM25 techniques. This hybrid approach leverages the strengths of both methods: embeddings capture semantic meaning, while BM25 ensures that exact matches are prioritized. This approach is used in the pipeline's `HYBRID` retrieval mode. 
+
+Overall, corpus growth increasingly favors this approach. In a controlled scaling study spanning 28 nested corpus tiers and 511,959 documents, Wang et al. held the questions and a fixed set of relevant and adversarial documents constant while increasing the surrounding corpus. BM25 overtook the file-system agent at approximately 10 million corpus tokens and led at every larger shared tier, with its advantage approaching 20 points at full scale. The study therefore identifies lexical retrieval as a strong, low-cost default for candidate discovery in large corpora, while suggesting that agentic reasoning is more effective after ranked retrieval than as a replacement for it [@wang2026bm25]. Anthropic’s evaluation similarly combines Contextual Embeddings with Contextual BM25 and reports fewer retrieval failures than embeddings alone [@anthropic2024contextual]. 
+
+This justifies the hybrid contextual retrieval approach. Combining semantic and
 lexical signals outperforms embeddings alone [@anthropic2024contextual], and the
 scaling evidence marks lexical ranking as the strongest scalable default for
 enterprise corpora [@wang2026bm25], making BM25 essential for the exact-identifier
 queries that characterize deviation analysis.
 
-## Topic Modeling and its Application to Clinical and Quality Data
+## On Topic Modeling
 
 Topic modeling is an unsupervised technique that discovers latent themes in a
 document collection without predefined labels [@hankar2025topic]. It assumes each
@@ -717,8 +718,7 @@ topic's highest-probability words convey what it is about; because it summarizes
 at the document level, it is well suited to exploring large volumes of
 unstructured text [@hankar2025topic].
 
-Latent Dirichlet Allocation (LDA) [@blei2003lda] makes this precise as a
-three-level generative model. For a corpus of $M$ documents over a vocabulary of
+Early topic-modeling methods were based primarily on probabilistic representations of word occurrence.Latent Dirichlet Allocation (LDA), introduced by Blei, Ng, and Jordan [-@blei2003lda], formalized topic modeling as a three-level hierarchical generative model. For a corpus of $M$ documents over a vocabulary of
 size $V$ with $k$ topics, each topic's word probabilities are fixed by a
 $k\times V$ matrix $\boldsymbol{\beta}$ with $\beta_{ij}=p(w^{j}=1\mid z^{i}=1)$.
 A document of $N$ words is generated by drawing topic proportions
@@ -739,13 +739,10 @@ by topic coherence and topic diversity, and common challenges include choosing t
 topic count, instability across runs, and extracting coherent themes from short,
 sparse texts [@hankar2025topic].
 
-BERTopic reframes topic modeling as clustering over contextual embeddings, and
-separates document clustering from topic representation so language models can be
-swapped in and either stage tuned independently [@grootendorst2022bertopic]. Each
-document is embedded with a pre-trained transformer; the embeddings are reduced
+The advent of transformer-based language models enabled documents to be represented according to their contextual meaning rather than only their shared vocabulary. BERTopic uses a bidirectional Transformer encoder to learn contextual language representations from unlabeled text [@grootendorst2022bertopic]. Each document is embedded with a pre-trained transformer (BGE-M3); the embeddings are reduced
 with UMAP and clustered with HDBSCAN, a density-based method that finds clusters
 of varying density and treats unrelated documents as outliers rather than forcing
-them into a topic [@grootendorst2022bertopic]. Topic words are then derived per
+them into a topic [@grootendorst2022bertopic].  Topic words are then derived per
 cluster with a class-based TF-IDF, generalizing
 $W_{t,d}=\mathrm{tf}_{t,d}\log(N/\mathrm{df}_t)$ to
 $W_{t,c}=\mathrm{tf}_{t,c}\log(1+A/\mathrm{tf}_t)$, where $A$ is the average number
@@ -766,68 +763,13 @@ author's own suggested workaround, while the interpretable c-TF-IDF topic words
 remain reviewable by SMEs for downstream root-cause and trend analysis
 [@grootendorst2022bertopic].
 
-Topic modeling has been applied across information retrieval, text classification,
-recommendation, and bioinformatics [@hankar2025topic]. Its relevance to quality
-data is direct: Sánchez-Franco et al. applied BERTopic to quality-management
-abstracts (1980–2020), recovering 48 topic-clusters and 13 meta-topics and tracing
-their evolution [@hankar2025topic], the same mixture-of-topics view that treats a
-deviation as a blend of recurring operational themes rather than a single rigid
-category. But quality free text is dense with context-dependent short forms: "MS"
-can mean morphine sulfate, multiple sclerosis, or mass spectrometry, and the
-same form can differ across sites [@kugic2024shortform]. Unresolved, this ambiguity
-fragments the vocabulary a topic model sees and degrades coherence
-[@hankar2025topic], which is precisely why the pipeline resolves references and
-normalizes acronyms before topics are assigned, yielding cleaner, more
-interpretable themes.
+As Transformer models became larger, the field began moving toward generative LLMs. The next major transition in NLP came from scaling autoregressive, decoder-based models. Rather than requiring a dedicated fine-tuning stage for every task, models such as GPT-3 demonstrated that many tasks could be specified through natural-language instructions and a small number of examples provided directly in the prompt [@brown2020language].
 
-The same ambiguity undermines retrieval. The mechanism that gathers related
-deviations for topic and root-cause analysis. A chunk mentioning only a bare code
-or acronym carries too little context to match a query reliably, the same
-context-loss problem Contextual Retrieval solves by prepending a situating
-description before embedding and indexing [@anthropic2024contextual]. As detailed
-in the earlier section, grounding each record therefore does double duty: it
-disambiguates the vocabulary the topic model sees and enriches the text the
-retriever indexes, which is why the pipeline pairs contextual enrichment with
-hybrid dense-plus-BM25 retrieval, supporting both the themes surfaced by topic
-modeling and the exact-identifier queries characteristic of deviation analysis
-[@wang2026bm25].
-
-## Methods: Topic Modeling and Root-Cause Assignment
-
-The pipeline assigns interpretable topics and root-cause categories to each
-deviation event using three complementary strategies over the same
-contextualized BGE-M3 representation: (1) zero-shot BERTopic against a fixed
-quality taxonomy, (2) an unsupervised full- vs. core-tier BERTopic comparison,
-and (3) an LLM-based multi-label classifier. All three consume the enriched text
-produced by the contextual-retrieval stage, so entities and acronyms are resolved
-before topics are assigned.
-
-Topic assignment reads from `deviation_embeddings`, the only table holding both
-the precomputed BGE-M3 vectors and the source text. Two design decisions follow
-directly from BERTopic's architecture, which deliberately separates document
-clustering from topic representation [@grootendorst2022bertopic]. First,
-clustering uses the `embedding` column, BGE-M3 encoded over the enriched
-`contextual_retrieval_text_full`, so documents are grouped in a space that already
-carries resolved-reference and situating context, directly addressing the
-context-loss and short-form ambiguity that would otherwise fragment topics
-[@anthropic2024contextual; @kugic2024shortform]. Second, the class-based TF-IDF
-(c-TF-IDF) labeling step uses the clean `source_free_text_full`, stripped of its
-`Column_Name:` scaffolding, so topic keywords reflect deviation content rather
-than schema tokens. Because the embeddings are precomputed, BERTopic skips
-re-encoding and only encodes the short candidate-label strings.
-
-The first strategy defines 18 candidate topics from GxP quality vocabulary
-(inadvertent unblinding, GMP manufacturing deviation, stability OOS). Each
-label is encoded with BGE-M3 into the same 1024-dimensional space as the
-documents, and events are matched by cosine similarity above a 0.5 threshold;
-documents matching no label are clustered as emergent topics via UMAP + HDBSCAN.
-This is a faithful instantiation of the BERTopic procedure: transformer
-embeddings, UMAP dimensionality reduction—chosen because distance measures
-degrade in high dimensions—and HDBSCAN density-based clustering that models
-unrelated documents as outliers rather than forcing them into a topic
-[@grootendorst2022bertopic]. Topic words are then generated per cluster with
-c-TF-IDF, following the paper's generalization of TF-IDF from documents to
-concatenated document "classes" [@grootendorst2022bertopic].
+Topic modeling was conducted in two zero-shot stages. First, zero-shot BERTopic assigned deviation records to 18 predefined domain topics from GxP quality vocabulary
+(inadvertent unblinding, GMP manufacturing deviation, stability OOS)using cosine similarity in a shared BGE-M3 embedding space. Precomputed 1,024-dimensional BGE-M3 embeddings of the fully contextualized deviation records were reused, while the candidate topic descriptions were embedded using the same model. Records meeting the similarity threshold were assigned to the predefined topics, while the remaining records were clustered using UMAP and HDBSCAN to identify potentially emergent themes. BERTopic’s class-based TF-IDF representation was then used to extract the terms most characteristic of each resulting topic. To test the value of contextual enrichment, the same BERTopic configuration is fit twice: once on
+`embedding` (BGE-M3 over the full contextualized text) and once on `core_embedding` (BGE-M3 over the core text only). Agreement between the two partitions is quantified with Adjusted Rand Index and Normalized Mutual Information, and quality is compared via outlier rate and topic diversity, which is the
+distinctiveness metric standard in the topic-modeling literature
+[@hankar2025topic; @grootendorst2022bertopic].
 
 A deviation often spans several themes (a manufacturing deviation, an
 overdue CAPA, and a documentation gap). This is precisely BERTopic's
@@ -841,38 +783,45 @@ computes topic relevance over a sliding window of passages, and topics above a
 motivates LDA, where a document is modeled as a mixture over latent topics rather
 than a single category [@blei2003lda].
 
-To test the value of contextual enrichment, the same BERTopic configuration
-(identical UMAP/HDBSCAN parameters and c-TF-IDF vocabulary) is fit twice: once on
-`embedding` (BGE-M3 over the full contextualized text) and once on
-`core_embedding` (BGE-M3 over the core text only). Agreement between the two
-partitions is quantified with Adjusted Rand Index and Normalized Mutual
-Information, and quality is compared via outlier rate and topic diversity, which is the
-distinctiveness metric standard in the topic-modeling literature
-[@hankar2025topic; @grootendorst2022bertopic]. Holding the clustering algorithm
-fixed isolates the effect of how much context was embedded, testing the central
-claim that prepending situating context improves the representation
-[@anthropic2024contextual].
-
-The third strategy is a per-document, multi-label LLM classifier
-(`databricks-gpt-5-4-mini`) run over `contextual_retrieval_text_full`. A
-hybrid prompt prefers a fixed 21-topic taxonomy but may invent a concise novel
-topic when nothing fits, and additionally returns a root-cause category (an
-Ishikawa-style controlled vocabulary), a regulatory-impact category, a quoted
+Second, a zero-shot LLM classification step was applied to interpret each deviation directly against the predefined topic taxonomy using `databricks-gpt-5-4-mini`. Unlike BERTopic, which relies on embedding similarity and density-based clustering, the LLM evaluated the contextualized narrative through language-based reasoning and could assign multiple applicable labels when a deviation involved more than one quality issue. A hybrid prompt prefers a fixed 21-topic taxonomy but may invent a concise novel
+topic when nothing fits, a regulatory-impact category, a quoted
 evidence span, and a calibrated confidence score. Grounding guardrails instruct
 the model to use "Not determinable" rather than guess, keeping generated labels
 tied to textual evidence. Returned labels are snapped to canonical spellings; unmatched labels are tracked as taxonomy-expansion
 candidates. Running the classifier on the enriched text rather than raw narrative
 is essential: without resolved references, an identifier such as `TAK-999-3002`
 carries too little standalone meaning for either a topic model or an LLM to
-interpret reliably [@kugic2024shortform].
+interpret reliably [@kugic2024shortform]. 
 
-Finally, zero-shot BERTopic and LLM labels are compared per event across primary,
-secondary, and tertiary assignments. The two methods are complementary:
-BERTopic provides unsupervised, corpus-grounded clusters with reproducible
-c-TF-IDF keywords, while the LLM provides evidence-anchored labels and root-cause
-reasoning. Agreement raises confidence in an assignment; divergence flags events
-for subject-matter-expert review, supporting the downstream root-cause and trend
-analysis the supplementary table is built for.
+Using both approaches provided complementary views: zero-shot BERTopic offered a scalable and reproducible representation of corpus-level semantic structure, while zero-shot LLM classification provided a more flexible interpretation of complex, multi-topic records. 
+
+Topic modeling has been applied across information retrieval, text
+classification, recommendation, and bioinformatics [@hankar2025topic]. Its
+relevance to quality data is direct: Sánchez-Franco et al. applied BERTopic to
+quality-management abstracts published between 1980 and 2020, recovering 48
+topic clusters and 13 meta-topics and tracing their evolution
+[@hankar2025topic]. Similarly, deviation narratives can reflect multiple
+recurring operational themes rather than belonging to a single rigid category.
+
+The applicability of embedding-based topic modeling to quality data has
+precedent. Sánchez-Franco et al. applied BERTopic to quality-management
+abstracts published between 1980 and 2020, recovering 48 topic clusters and 13
+meta-topics and tracing their evolution [@hankar2025topic]. This demonstrates
+how topic modeling can organize a heterogeneous quality corpus into recurring,
+interpretable themes, although deviation narratives introduce additional
+challenges because they are record-level operational texts rather than
+publication abstracts.
+
+## On Root-Cause Assignment
+
+Root-cause analysis was conducted using two complementary zero-shot approaches.
+
+First, a BERT-based zero-shot classifier evaluated each contextualized deviation against predefined root-cause candidate labels derived from the existing root-cause taxonomy. The classifier compared the semantic representation of the deviation with the candidate labels and returned ranked root-cause assignments, allowing the existing taxonomy to be applied without training a separate supervised classifier on labeled deviation records. The contextualized input was used so that identifiers, acronyms, and referenced entities were represented with their resolved meanings rather than as isolated terms. The resulting primary, secondary, and tertiary labels provided a granular view of the likely root-cause mechanism, including categories such as insufficient procedural detail, inadequate sampling methods, supplier-documentation issues, inadequate preventive-maintenance or calibration schedules, and ineffective training.
+
+Second, `databricks-gpt-5-4-mini` independently evaluated the enriched context and source narrative using a controlled Ishikawa 6M framework. The available categories were Man, Method, Machine, Material, Measurement, and Environment, with Root Cause -- Not Identified retained when the narrative did not contain sufficient evidence. The model returned one primary root-cause category and up to two contributing factors, together with a supporting evidence summary and confidence score. Grounding instructions required the model to rely only on information stated in the deviation and to avoid inferring a cause when the available evidence was insufficient. Restricting the output to the controlled 6M vocabulary standardized the higher-level categories across records, while the BERT-based assignments preserved more detailed root-cause distinctions. The two approaches therefore served different analytical purposes. 
+
+The BERT-based zero-shot classifier provided reproducible semantic matching against a granular root-cause taxonomy, whereas the LLM consolidated the evidence into a broader, interpretable Ishikawa category and retained supporting context for review. Agreement between the two outputs provided converging evidence for a root-cause assignment, while disagreements, low-confidence results, and Root Cause -- Not Identified cases were preserved for subject-matter expert review. Neither output was treated as an independently validated causal conclusion.
+
 
 ## Feature: Semantic Search
 
@@ -1042,10 +991,9 @@ I am grateful to have had the opportunity to work on this project, and I hope it
 
 This work was made possible through collaboration across R&D Quality Compliance, Systems and Data, and DD&T. I am grateful to my manager, Saeed Babaeizadeh, and to Aayushi Prasad, my Tomodachi. I thank them for sharing their expertise on TrackWise, deviations, and deterministic rules; as well as Calvin Neprud, Karthik Suresh, Michael Prokle, and Bob Sorabella for helping me locate or creating the reference tables for MDM. I owe particular thanks to Katie Evenson and Calvin. Their guidance shaped this project in lasting ways. Beyond their feedback on seeding topics, business logic, and schema planning, they helped me understand what genuinely useful outputs look like and how to frame them for the people who would rely on them, and Katie's encouragement and tips on presenting the work gave me both direction and confidence, and this project is stronger for it. My thanks also to Jared Wiemann and Kanrong Yu for their support of this work.
 
-I had many wonderful conversations along the way with Mingxi Song, Kevin Cheng, Minnan Xu, Neda Hassanpour, Nellie Holger, and everyone I met across MA Bio Ops, DD&T, and over lunch. Finally, I would especially like to thank Xuemei Li and Yunliang Cai for their
-mentorship. They gave me a great deal of perspective. 
+I had many wonderful conversations along the way with Mingxi Song, Kevin Cheng, Minnan Xu, Neda Hassanpour, Nellie Holger, and everyone I met across MA Bio Ops, DD&T, and over lunch. Finally, I would especially like to thank Xuemei Li and Yunliang Cai for their mentorship. They gave me a great deal of perspective. 
 
-This project was, for me, far more than a technical deliverable. I came away with a more independent (agentic, if you will) problem-solving workflow, a clearer sense of how to set goals and learned what it means to build within data-governance constraints. I was never drawn to NLP, yet somehow now, I cannot stop thinking about it. Retrieval-system design and the Databricks documentation page plague my nightly visions. I realized I was interested in something in the domain of NLP after all, namely, optimal guarantees for topic models with an unknown number of topics using NMF. I will head into my final year of undergraduate study at the University of Toronto. My primary interest remains in applying machine learning and multivariate statistics to medicine and biology; functional analysis and representation learning. If you would like to continue the conversation, please feel free to reach out to me on LinkedIn.
+This project was far more than a technical deliverable to me. I came away with a more independent, or agentic, problem-solving workflow, a clearer understanding of how to set goals, and a deeper appreciation of what it means to build within data-governance constraints. I also gained a much stronger understanding of the pharmaceutical quality domain and of how technical methods must be adapted to the decisions, terminology, and constraints of the industry. I admire the work being done in this space, and I hope this is not the last time I have the opportunity to contribute to it.
 
 \newpage
 

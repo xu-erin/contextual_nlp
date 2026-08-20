@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Types: Keyword vs Semantic vs Hybrid</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 40px 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 50px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .search-types {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 50px rgba(0,0,0,0.3);
+        }
+        
+        .card h2 {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            border-bottom: 3px solid;
+            padding-bottom: 10px;
+        }
+        
+        .card-keyword h2 {
+            color: #2E86AB;
+            border-color: #2E86AB;
+        }
+        
+        .card-semantic h2 {
+            color: #A23B72;
+            border-color: #A23B72;
+        }
+        
+        .card-hybrid h2 {
+            color: #F18F01;
+            border-color: #F18F01;
+        }
+        
+        .query {
+            background: #f5f5f5;
+            border-left: 4px solid;
+            padding: 12px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            font-style: italic;
+            font-weight: 500;
+        }
+        
+        .card-keyword .query {
+            border-color: #2E86AB;
+            background: #E8F4F8;
+        }
+        
+        .card-semantic .query {
+            border-color: #A23B72;
+            background: #F8E8F4;
+        }
+        
+        .card-hybrid .query {
+            border-color: #F18F01;
+            background: #F8F0E8;
+        }
+        
+        .method {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .method strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        
+        .result {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid;
+        }
+        
+        .result.match {
+            background: #E8F5E9;
+            border-color: #4CAF50;
+        }
+        
+        .result.partial {
+            background: #FFF3E0;
+            border-color: #FF9800;
+        }
+        
+        .result.nomatch {
+            background: #FFEBEE;
+            border-color: #F44336;
+        }
+        
+        .indicator {
+            font-weight: bold;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .indicator::before {
+            font-size: 1.2em;
+        }
+        
+        .match .indicator::before { content: "✓"; color: #4CAF50; }
+        .partial .indicator::before { content: "≈"; color: #FF9800; }
+        .nomatch .indicator::before { content: "✗"; color: #F44336; }
+        
+        .result-text {
+            font-size: 0.9em;
+            color: #555;
+            line-height: 1.4;
+        }
+        
+        .pros {
+            background: #E8F5E9;
+            border-left: 4px solid #4CAF50;
+            padding: 12px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        
+        .pros strong {
+            display: block;
+            color: #2E7D32;
+            margin-bottom: 8px;
+        }
+        
+        .pros li {
+            margin-left: 20px;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .comparison {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow-x: auto;
+        }
+        
+        .comparison h2 {
+            text-align: center;
+            margin-bottom: 25px;
+            color: #333;
+            font-size: 2em;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 500px;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 15px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        tr:hover {
+            background: #f9f9f9;
+        }
+        
+        .metric-name {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .score-low { color: #F44336; font-weight: bold; }
+        .score-medium { color: #FF9800; font-weight: bold; }
+        .score-high { color: #4CAF50; font-weight: bold; }
+        
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 40px;
+            font-size: 0.95em;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 Search Types Explained</h1>
+        
+        <div class="search-types">
+            <!-- Keyword Search -->
+            <div class="card card-keyword">
+                <h2>Keyword Search</h2>
+                <div class="query">📝 Query: "unblinding clinical trial"</div>
+                
+                <div class="method">
+                    <strong>How it works:</strong>
+                    Looks for documents containing the exact words from your query.
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Doc 1: "Clinical trial unblinding occurred"</div>
+                    <div class="result-text">✓ Contains both "unblinding" AND "clinical trial"</div>
+                </div>
+                
+                <div class="result partial">
+                    <div class="indicator">Doc 2: "Patient discovered treatment assignment"</div>
+                    <div class="result-text">✗ No exact match for query terms</div>
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Doc 3: "Unblinding study protocol"</div>
+                    <div class="result-text">✓ Contains "unblinding"</div>
+                </div>
+                
+                <div class="pros">
+                    <strong>✓ Strengths:</strong>
+                    <ul>
+                        <li>Fast and simple</li>
+                        <li>Predictable</li>
+                        <li>Good for exact matches</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Semantic Search -->
+            <div class="card card-semantic">
+                <h2>Semantic Search</h2>
+                <div class="query">🧠 Query: "unblinding clinical trial"</div>
+                
+                <div class="method">
+                    <strong>How it works:</strong>
+                    Converts text to numerical vectors (embeddings) and finds documents with similar meaning using cosine similarity.
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Doc 1: "Clinical trial unblinding occurred" (0.95)</div>
+                    <div class="result-text">Perfect semantic match - nearly identical meaning</div>
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Doc 2: "Patient discovered treatment allocation" (0.88)</div>
+                    <div class="result-text">Strong match - captures synonym "allocation" for "assignment"</div>
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Doc 3: "Inadvertent exposure of treatment arm" (0.82)</div>
+                    <div class="result-text">Good match - understands related concepts</div>
+                </div>
+                
+                <div class="pros">
+                    <strong>✓ Strengths:</strong>
+                    <ul>
+                        <li>Understands meaning & context</li>
+                        <li>Finds synonyms & related concepts</li>
+                        <li>More relevant results</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Hybrid Search -->
+            <div class="card card-hybrid">
+                <h2>Hybrid Search</h2>
+                <div class="query">⚡ Query: "unblinding clinical trial"</div>
+                
+                <div class="method">
+                    <strong>How it works:</strong>
+                    Runs BOTH keyword search AND semantic search in parallel, then combines and ranks the results intelligently.
+                </div>
+                
+                <div class="result match">
+                    <div class="indicator">Keyword + Semantic Combined</div>
+                    <div class="result-text">
+                        🔹 Gets exact matches from keyword search (high precision)<br>
+                        🔹 Adds semantic understanding from embeddings (high recall)<br>
+                        🔹 Reranks by relevance using both signals
+                    </div>
+                </div>
+                
+                <div class="pros">
+                    <strong>✓ Strengths:</strong>
+                    <ul>
+                        <li>Best of both worlds</li>
+                        <li>Highest precision & recall</li>
+                        <li>Handles both exact and semantic matches</li>
+                        <li>Most relevant results first</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Comparison Table -->
+        <div class="comparison">
+            <h2>📊 Head-to-Head Comparison</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Aspect</th>
+                        <th>Keyword Search</th>
+                        <th>Semantic Search</th>
+                        <th>Hybrid Search</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="metric-name">Speed</td>
+                        <td><span class="score-high">Very Fast</span></td>
+                        <td><span class="score-low">Slower</span></td>
+                        <td><span class="score-medium">Moderate</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Precision (accuracy)</td>
+                        <td><span class="score-high">High</span></td>
+                        <td><span class="score-medium">Medium</span></td>
+                        <td><span class="score-high">Highest</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Recall (completeness)</td>
+                        <td><span class="score-low">Low</span></td>
+                        <td><span class="score-high">High</span></td>
+                        <td><span class="score-high">Highest</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Handles synonyms</td>
+                        <td><span class="score-low">No</span></td>
+                        <td><span class="score-high">Yes</span></td>
+                        <td><span class="score-high">Yes</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Understands context</td>
+                        <td><span class="score-low">No</span></td>
+                        <td><span class="score-high">Yes</span></td>
+                        <td><span class="score-high">Yes</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Computational cost</td>
+                        <td><span class="score-high">Low</span></td>
+                        <td><span class="score-low">High</span></td>
+                        <td><span class="score-medium">Medium-High</span></td>
+                    </tr>
+                    <tr>
+                        <td class="metric-name">Best for</td>
+                        <td>Simple, exact queries</td>
+                        <td>Understanding intent & meaning</td>
+                        <td>Production systems (optimal balance)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>💡 <strong>Pro Tip:</strong> Modern search systems (like Bing, Google, and DevOps platforms) increasingly use hybrid approaches to balance speed, relevance, and user experience.</p>
+        </div>
+    </div>
+</body>
+</html>
