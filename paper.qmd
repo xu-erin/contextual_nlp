@@ -23,7 +23,7 @@ link-citations: true
 | **Author:** Erin Xu
 | **Manager:** Saeed Babaeizadeh
 | **Team:** R&D Quality
-| **Github repository:** QDN space, TBA
+| **Github repository:** [RDQ Data and Digital Team, main repository](https://github.com/oneTakeda/rdq-data-and-digital-main)
 
 ## Purpose
 
@@ -197,6 +197,18 @@ The pipeline uses six reference datasets to resolve entities found in deviation 
 | CROs | Vendor MDM (Databricks) | Dynamic | `us_gmsgq_dev.gms_us_alyt.cro_deviations` | `Name`, `Display Name`, `description` | Resolve known CRO names and add descriptive context |
 | Devices | CTMS (available elsewhere) | Static | `us_gmsgq_dev.gms_us_alyt.rd_device_list_deviations` | `Name`, `Alias`, `Device_Long_name`, `Device_Type`, `business_owner` | Resolve device-name variants and add type and ownership context |
 | Vendors | Vendor MDM (Databricks) | Dynamic | `us_gmsgq_dev.gms_us_alyt.supplier_list_deviations` | `Supplier_Name_RD`, `Country_RD` | Resolve known external supplier names and country context |
+
+### Source Access Links
+
+The following links provide access to selected source systems or, where the original extract is unavailable, the available source schema or supporting reference:
+
+- For clinical identifiers, the original device list could not be located; the available [Databricks schema](https://onetakeda-usprd-gmsgq.cloud.databricks.com/editor/notebooks/2506825448520545?o=1405057703813365#command/7461614389742927). 
+- [Controlled documents: Veeva documents table in Databricks](https://onetakeda-usprd-gmsgq.cloud.databricks.com/explore/data/us_gmsgq_prd/gms_us_lake/gmsgq_veeva_documents?o=1405057703813365&activeTab=sample)
+- [Acronyms: Takeda Acronym List](https://mytakeda.sharepoint.com/sites/AbbreviationsandAcronyms/Lists/Acronym%20List/AllItems.aspx?FilterField1=Section&FilterValue1=Takeda%2Dspecific%20&FilterType1=Choice&viewid=a309a07f%2D01a0%2D4d58%2Dbfbf%2Dacc2d97f8dfd&view=7&q=clinical%20identifiers)
+- [CRO and vendor IT-component reference: LeanIX data on SharePoint](https://mytakeda.sharepoint.com/teams/futurereadyapps/Shared%20Documents/Forms/AllItems.aspx?id=%2Fteams%2Ffuturereadyapps%2FShared%20Documents%2FLeanIX%2Ddata&viewid=007ef185%2D2c5a%2D42fa%2D8967%2D2d620effe0df)
+- [Vendor MDM source: Databricks reference notebook](https://onetakeda-usprd-gmsgq.cloud.databricks.com/editor/notebooks/2506825448520545?o=1405057703813365#command/7461614389742927)
+- For devices, the original device list could not be located; the available [Databricks table schema](https://onetakeda-usdev-gmsgq.cloud.databricks.com/explore/data/us_gmsgq_dev/gms_us_alyt/rd_device_list_deviations?o=55286904982300) is provided instead.
+
 
 ## Entity-Specific Resolution Rules
 
